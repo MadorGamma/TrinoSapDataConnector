@@ -1,4 +1,4 @@
-package org.example;
+package tom.trinosaphanaconnector;
 
 import io.airlift.configuration.Config;
 import io.airlift.units.Duration;

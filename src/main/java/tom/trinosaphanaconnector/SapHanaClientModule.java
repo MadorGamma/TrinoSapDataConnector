@@ -1,4 +1,4 @@
-package org.example;
+package tom.trinosaphanaconnector;
 
 import com.google.inject.Binder;
 import com.google.inject.Provides;

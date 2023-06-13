@@ -1,4 +1,4 @@
-package org.example;
+package tom.trinosaphanaconnector;
 
 import io.trino.plugin.jdbc.JdbcPlugin;
 
