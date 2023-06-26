@@ -1,42 +1,33 @@
 package tom.trinosaphanaconnector;
 
 
-import io.trino.plugin.jdbc.BaseJdbcClient;
-import io.trino.plugin.jdbc.BaseJdbcConfig;
-import io.trino.plugin.jdbc.ColumnMapping;
-import io.trino.plugin.jdbc.ConnectionFactory;
-import io.trino.plugin.jdbc.JdbcTypeHandle;
-import io.trino.plugin.jdbc.QueryBuilder;
-import io.trino.plugin.jdbc.WriteMapping;
+import io.trino.plugin.jdbc.*;
 import io.trino.plugin.jdbc.logging.RemoteQueryModifier;
 import io.trino.plugin.jdbc.mapping.IdentifierMapping;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.type.CharType;
+import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
+
+import static io.airlift.slice.Slices.utf8Slice;
+import static io.airlift.slice.Slices.wrappedBuffer;
+import static io.trino.plugin.jdbc.StandardColumnMappings.timestampColumnMapping;
+import static io.trino.plugin.jdbc.StandardColumnMappings.timestampWriteFunction;
 
 import javax.inject.Inject;
 
 import java.sql.Connection;
 import java.sql.Types;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.Optional;
 
 import static io.trino.plugin.jdbc.PredicatePushdownController.DISABLE_PUSHDOWN;
-import static io.trino.plugin.jdbc.StandardColumnMappings.bigintColumnMapping;
-import static io.trino.plugin.jdbc.StandardColumnMappings.bigintWriteFunction;
-import static io.trino.plugin.jdbc.StandardColumnMappings.charReadFunction;
-import static io.trino.plugin.jdbc.StandardColumnMappings.charWriteFunction;
-import static io.trino.plugin.jdbc.StandardColumnMappings.doubleColumnMapping;
-import static io.trino.plugin.jdbc.StandardColumnMappings.doubleWriteFunction;
-import static io.trino.plugin.jdbc.StandardColumnMappings.integerColumnMapping;
-import static io.trino.plugin.jdbc.StandardColumnMappings.integerWriteFunction;
-import static io.trino.plugin.jdbc.StandardColumnMappings.realColumnMapping;
-import static io.trino.plugin.jdbc.StandardColumnMappings.realWriteFunction;
-import static io.trino.plugin.jdbc.StandardColumnMappings.smallintColumnMapping;
-import static io.trino.plugin.jdbc.StandardColumnMappings.smallintWriteFunction;
-import static io.trino.plugin.jdbc.StandardColumnMappings.varcharReadFunction;
-import static io.trino.plugin.jdbc.StandardColumnMappings.varcharWriteFunction;
+import static io.trino.plugin.jdbc.PredicatePushdownController.FULL_PUSHDOWN;
+import static io.trino.plugin.jdbc.StandardColumnMappings.*;
+import static io.trino.plugin.jdbc.StandardColumnMappings.varbinaryWriteFunction;
 import static io.trino.plugin.jdbc.TypeHandlingJdbcSessionProperties.getUnsupportedTypeHandling;
 import static io.trino.plugin.jdbc.UnsupportedTypeHandling.CONVERT_TO_VARCHAR;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
@@ -46,11 +37,16 @@ import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.SmallintType.SMALLINT;
+import static io.trino.spi.type.TimestampType.createTimestampType;
+import static io.trino.spi.type.VarbinaryType.VARBINARY;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static io.trino.spi.type.VarcharType.createVarcharType;
 
-
 public class SapHanaClient extends BaseJdbcClient {
+
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("uuuu-MM-dd");
+
+
     @Inject
     public SapHanaClient(
             BaseJdbcConfig config,
@@ -86,10 +82,42 @@ public class SapHanaClient extends BaseJdbcClient {
                 return Optional.of(doubleColumnMapping());
 
             case Types.CHAR:
+            case Types.NCHAR:
                 return Optional.of(charColumnMapping(typeHandle.getRequiredColumnSize()));
 
             case Types.VARCHAR:
+            case Types.NVARCHAR:
                 return Optional.of(varcharColumnMapping(typeHandle.getRequiredColumnSize()));
+
+            case Types.BINARY:
+            case Types.VARBINARY:
+            case Types.LONGVARBINARY:
+                return Optional.of(ColumnMapping.sliceMapping(VARBINARY, varbinaryReadFunction(), varbinaryWriteFunction(), FULL_PUSHDOWN));
+//
+//            case Types.TIMESTAMP:
+//                TimestampType timestampType = createTimestampType(getTimestampPrecision(typeHandle.getRequiredColumnSize()));
+//                return Optional.of(timestampColumnMapping(timestampType));
+
+            case Types.BLOB:
+                return Optional.of(ColumnMapping.sliceMapping(
+                        VARBINARY,
+                        (resultSet, columnIndex) -> wrappedBuffer(resultSet.getBytes(columnIndex)),
+                        varbinaryWriteFunction(),
+                        DISABLE_PUSHDOWN));
+
+            case Types.CLOB:
+            case Types.NCLOB:
+                return Optional.of(ColumnMapping.sliceMapping(
+                        createUnboundedVarcharType(),
+                        (resultSet, columnIndex) -> utf8Slice(resultSet.getString(columnIndex)),
+                        varcharWriteFunction(),
+                        DISABLE_PUSHDOWN));
+
+            case Types.TIMESTAMP:
+                int precision = typeHandle.getRequiredDecimalDigits();
+                return Optional.of(timestampColumnMapping(createTimestampType(precision)));
+
+
         }
 
         if (getUnsupportedTypeHandling(session) == CONVERT_TO_VARCHAR) {
@@ -117,6 +145,9 @@ public class SapHanaClient extends BaseJdbcClient {
         }
         if (type == DOUBLE) {
             return WriteMapping.doubleMapping("double precision", doubleWriteFunction());
+        }
+        if (type == VARBINARY) {
+            return WriteMapping.sliceMapping("mediumblob", varbinaryWriteFunction());
         }
 
         if (type instanceof CharType) {
@@ -160,6 +191,11 @@ public class SapHanaClient extends BaseJdbcClient {
                 varcharReadFunction(varcharType),
                 varcharWriteFunction(),
                 DISABLE_PUSHDOWN);
+    }
+
+    private static LongReadFunction sqlServerDateReadFunction()
+    {
+        return (resultSet, index) -> LocalDate.parse(resultSet.getString(index), DATE_FORMATTER).toEpochDay();
     }
 
 }
