@@ -6,10 +6,9 @@ import io.airlift.units.MaxDuration;
 import io.airlift.units.MinDuration;
 
 import javax.validation.constraints.NotNull;
-import java.util.concurrent.TimeUnit;
 
 public class SapHanaConfig {
-    private Duration timeout = Duration.succinctDuration(10, TimeUnit.SECONDS);
+    private Duration timeout = Duration.succinctDuration(10, Duration.valueOfTimeUnit("s"));
 
     @NotNull
     @MaxDuration("10m")

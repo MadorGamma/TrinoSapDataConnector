@@ -1,33 +1,29 @@
 package tom.trinosaphanaconnector;
 
 
+import io.trino.plugin.base.mapping.IdentifierMapping;
 import io.trino.plugin.jdbc.*;
 import io.trino.plugin.jdbc.logging.RemoteQueryModifier;
-import io.trino.plugin.jdbc.mapping.IdentifierMapping;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.type.CharType;
-import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
-
-import static io.airlift.slice.Slices.utf8Slice;
-import static io.airlift.slice.Slices.wrappedBuffer;
-import static io.trino.plugin.jdbc.StandardColumnMappings.timestampColumnMapping;
-import static io.trino.plugin.jdbc.StandardColumnMappings.timestampWriteFunction;
+import org.weakref.jmx.$internal.guava.collect.ImmutableList;
 
 import javax.inject.Inject;
-
 import java.sql.Connection;
 import java.sql.Types;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Optional;
 
+import static io.airlift.slice.Slices.utf8Slice;
+import static io.airlift.slice.Slices.wrappedBuffer;
 import static io.trino.plugin.jdbc.PredicatePushdownController.DISABLE_PUSHDOWN;
 import static io.trino.plugin.jdbc.PredicatePushdownController.FULL_PUSHDOWN;
 import static io.trino.plugin.jdbc.StandardColumnMappings.*;
-import static io.trino.plugin.jdbc.StandardColumnMappings.varbinaryWriteFunction;
 import static io.trino.plugin.jdbc.TypeHandlingJdbcSessionProperties.getUnsupportedTypeHandling;
 import static io.trino.plugin.jdbc.UnsupportedTypeHandling.CONVERT_TO_VARCHAR;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
@@ -45,6 +41,7 @@ import static io.trino.spi.type.VarcharType.createVarcharType;
 public class SapHanaClient extends BaseJdbcClient {
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("uuuu-MM-dd");
+    private final List<String> tableTypes;
 
 
     @Inject
@@ -53,71 +50,72 @@ public class SapHanaClient extends BaseJdbcClient {
             ConnectionFactory connectionFactory,
             QueryBuilder queryBuilder,
             IdentifierMapping identifierMapping,
-            RemoteQueryModifier remoteQueryModifier)
-    {
+            RemoteQueryModifier remoteQueryModifier) {
         super("\"", connectionFactory, queryBuilder, config.getJdbcTypesMappedToVarchar(), identifierMapping, remoteQueryModifier, true);
+        ImmutableList.Builder<String> tableTypes = ImmutableList.builder();
+        tableTypes.add("TABLE", "PARTITIONED TABLE", "VIEW", "MATERIALIZED VIEW", "FOREIGN TABLE", "COLUMN VIEW");
+        this.tableTypes = tableTypes.build();
     }
 
     @Override
-    public Optional<ColumnMapping> toColumnMapping(ConnectorSession session, Connection connection, JdbcTypeHandle typeHandle)
-    {
+    protected Optional<List<String>> getTableTypes() {
+        return Optional.of(tableTypes);
+    }
+
+    @Override
+    public Optional<ColumnMapping> toColumnMapping(ConnectorSession session, Connection connection, JdbcTypeHandle typeHandle) {
         Optional<ColumnMapping> mapping = getForcedMappingToVarchar(typeHandle);
         if (mapping.isPresent()) {
             return mapping;
         }
         switch (typeHandle.getJdbcType()) {
-            case Types.SMALLINT:
+            case Types.SMALLINT -> {
                 return Optional.of(smallintColumnMapping());
-
-            case Types.INTEGER:
+            }
+            case Types.INTEGER -> {
                 return Optional.of(integerColumnMapping());
-
-            case Types.BIGINT:
+            }
+            case Types.BIGINT -> {
                 return Optional.of(bigintColumnMapping());
-
-            case Types.REAL:
+            }
+            case Types.REAL -> {
                 return Optional.of(realColumnMapping());
-
-            case Types.DOUBLE:
+            }
+            case Types.DOUBLE -> {
                 return Optional.of(doubleColumnMapping());
-
-            case Types.CHAR:
-            case Types.NCHAR:
+            }
+            case Types.CHAR, Types.NCHAR -> {
                 return Optional.of(charColumnMapping(typeHandle.getRequiredColumnSize()));
-
-            case Types.VARCHAR:
-            case Types.NVARCHAR:
+            }
+            case Types.VARCHAR, Types.NVARCHAR -> {
                 return Optional.of(varcharColumnMapping(typeHandle.getRequiredColumnSize()));
-
-            case Types.BINARY:
-            case Types.VARBINARY:
-            case Types.LONGVARBINARY:
+            }
+            case Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY -> {
                 return Optional.of(ColumnMapping.sliceMapping(VARBINARY, varbinaryReadFunction(), varbinaryWriteFunction(), FULL_PUSHDOWN));
+            }
 //
 //            case Types.TIMESTAMP:
 //                TimestampType timestampType = createTimestampType(getTimestampPrecision(typeHandle.getRequiredColumnSize()));
 //                return Optional.of(timestampColumnMapping(timestampType));
 
-            case Types.BLOB:
+            case Types.BLOB -> {
                 return Optional.of(ColumnMapping.sliceMapping(
                         VARBINARY,
                         (resultSet, columnIndex) -> wrappedBuffer(resultSet.getBytes(columnIndex)),
                         varbinaryWriteFunction(),
                         DISABLE_PUSHDOWN));
-
-            case Types.CLOB:
-            case Types.NCLOB:
+            }
+            case Types.CLOB, Types.NCLOB -> {
                 return Optional.of(ColumnMapping.sliceMapping(
                         createUnboundedVarcharType(),
                         (resultSet, columnIndex) -> utf8Slice(resultSet.getString(columnIndex)),
                         varcharWriteFunction(),
                         DISABLE_PUSHDOWN));
-
-            case Types.TIMESTAMP:
+            }
+            case Types.TIMESTAMP -> {
                 int precision = typeHandle.getRequiredDecimalDigits();
                 return Optional.of(timestampColumnMapping(createTimestampType(precision)));
-
-
+            }
         }
 
         if (getUnsupportedTypeHandling(session) == CONVERT_TO_VARCHAR) {
@@ -128,8 +126,7 @@ public class SapHanaClient extends BaseJdbcClient {
     }
 
     @Override
-    public WriteMapping toWriteMapping(ConnectorSession session, Type type)
-    {
+    public WriteMapping toWriteMapping(ConnectorSession session, Type type) {
         if (type == SMALLINT) {
             return WriteMapping.longMapping("smallint", smallintWriteFunction());
         }
@@ -158,8 +155,7 @@ public class SapHanaClient extends BaseJdbcClient {
             String dataType;
             if (varcharType.isUnbounded()) {
                 dataType = "varchar";
-            }
-            else {
+            } else {
                 dataType = "varchar(" + varcharType.getBoundedLength() + ")";
             }
             return WriteMapping.sliceMapping(dataType, varcharWriteFunction());
@@ -168,8 +164,7 @@ public class SapHanaClient extends BaseJdbcClient {
         throw new TrinoException(NOT_SUPPORTED, "Unsupported column type: " + type.getDisplayName());
     }
 
-    private static ColumnMapping charColumnMapping(int charLength)
-    {
+    private static ColumnMapping charColumnMapping(int charLength) {
         if (charLength > CharType.MAX_LENGTH) {
             return varcharColumnMapping(charLength);
         }
@@ -181,8 +176,7 @@ public class SapHanaClient extends BaseJdbcClient {
                 DISABLE_PUSHDOWN);
     }
 
-    private static ColumnMapping varcharColumnMapping(int varcharLength)
-    {
+    private static ColumnMapping varcharColumnMapping(int varcharLength) {
         VarcharType varcharType = varcharLength <= VarcharType.MAX_LENGTH
                 ? createVarcharType(varcharLength)
                 : createUnboundedVarcharType();
@@ -193,8 +187,7 @@ public class SapHanaClient extends BaseJdbcClient {
                 DISABLE_PUSHDOWN);
     }
 
-    private static LongReadFunction sqlServerDateReadFunction()
-    {
+    private static LongReadFunction sqlServerDateReadFunction() {
         return (resultSet, index) -> LocalDate.parse(resultSet.getString(index), DATE_FORMATTER).toEpochDay();
     }
 
