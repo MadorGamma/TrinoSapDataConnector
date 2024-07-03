@@ -37,6 +37,9 @@ import static io.trino.spi.type.TimestampType.createTimestampType;
 import static io.trino.spi.type.VarbinaryType.VARBINARY;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static io.trino.spi.type.VarcharType.createVarcharType;
+import io.trino.spi.type.DecimalType;
+import io.trino.spi.type.Decimals;
+import static io.trino.spi.type.DecimalType.createDecimalType;
 
 public class SapHanaClient extends BaseJdbcClient {
 
@@ -83,6 +86,14 @@ public class SapHanaClient extends BaseJdbcClient {
             }
             case Types.DOUBLE -> {
                 return Optional.of(doubleColumnMapping());
+            }
+            case Types.DECIMAL -> {
+                int decimalDigits = typeHandle.requiredDecimalDigits();
+                int precision = typeHandle.requiredColumnSize() + max(-decimalDigits, 0); // Map decimal(p, -s) (negative scale) to decimal(p+s, 0).
+                if (precision > Decimals.MAX_PRECISION) {
+                    break;
+                }
+                return Optional.of(decimalColumnMapping(createDecimalType(precision, max(decimalDigits, 0))));
             }
             case Types.CHAR, Types.NCHAR -> {
                 return Optional.of(charColumnMapping(typeHandle.getRequiredColumnSize()));
