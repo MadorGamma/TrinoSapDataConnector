@@ -165,7 +165,7 @@ public class SapHanaClient extends BaseJdbcClient {
         if (type instanceof VarcharType varcharType) {
             String dataType;
             if (varcharType.isUnbounded()) {
-                dataType = "varchar";
+                dataType = "varchar(" + VarcharType.MAX_LENGTH + ")";
             } else {
                 dataType = "varchar(" + varcharType.getBoundedLength() + ")";
             }
@@ -190,7 +190,7 @@ public class SapHanaClient extends BaseJdbcClient {
     private static ColumnMapping varcharColumnMapping(int varcharLength) {
         VarcharType varcharType = varcharLength <= VarcharType.MAX_LENGTH
                 ? createVarcharType(varcharLength)
-                : createUnboundedVarcharType();
+                : createVarcharType(VarcharType.MAX_LENGTH);
         return ColumnMapping.sliceMapping(
                 varcharType,
                 varcharReadFunction(varcharType),
