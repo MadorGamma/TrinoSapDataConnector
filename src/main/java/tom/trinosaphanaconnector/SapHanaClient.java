@@ -154,6 +154,13 @@ public class SapHanaClient extends BaseJdbcClient {
         if (type == DOUBLE) {
             return WriteMapping.doubleMapping("double precision", doubleWriteFunction());
         }
+        if (type == DECIMAL) {
+            String dataType = format("decimal(%s, %s)", decimalType.getPrecision(), decimalType.getScale());
+            if (decimalType.isShort()) {
+                return WriteMapping.longMapping(dataType, shortDecimalWriteFunction(decimalType));
+            }
+            return WriteMapping.objectMapping(dataType, longDecimalWriteFunction(decimalType));
+        }
         if (type == VARBINARY) {
             return WriteMapping.sliceMapping("mediumblob", varbinaryWriteFunction());
         }
